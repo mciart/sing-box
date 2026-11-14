@@ -1146,7 +1146,8 @@
                         "dtls",
                         "ssh",
                         "rdp",
-                        "ntp"
+                        "ntp",
+                        "minecraft"
                       ]
                     },
                     {
@@ -1163,7 +1164,8 @@
                           "dtls",
                           "ssh",
                           "rdp",
-                          "ntp"
+                          "ntp",
+                          "minecraft"
                         ]
                       }
                     }
@@ -8786,7 +8788,8 @@
                     "dtls",
                     "ssh",
                     "rdp",
-                    "ntp"
+                    "ntp",
+                    "minecraft"
                   ]
                 },
                 {
@@ -8803,7 +8806,8 @@
                       "dtls",
                       "ssh",
                       "rdp",
-                      "ntp"
+                      "ntp",
+                      "minecraft"
                     ]
                   }
                 }
@@ -9374,7 +9378,8 @@
                     "dtls",
                     "ssh",
                     "rdp",
-                    "ntp"
+                    "ntp",
+                    "minecraft"
                   ]
                 },
                 {
@@ -9391,7 +9396,8 @@
                       "dtls",
                       "ssh",
                       "rdp",
-                      "ntp"
+                      "ntp",
+                      "minecraft"
                     ]
                   }
                 }
@@ -14379,7 +14385,8 @@
                         "dtls",
                         "ssh",
                         "rdp",
-                        "ntp"
+                        "ntp",
+                        "minecraft"
                       ]
                     },
                     {
@@ -14396,7 +14403,8 @@
                           "dtls",
                           "ssh",
                           "rdp",
-                          "ntp"
+                          "ntp",
+                          "minecraft"
                         ]
                       }
                     }
@@ -15103,7 +15111,8 @@
                     "dtls",
                     "ssh",
                     "rdp",
-                    "ntp"
+                    "ntp",
+                    "minecraft"
                   ]
                 },
                 {
@@ -15120,7 +15129,8 @@
                       "dtls",
                       "ssh",
                       "rdp",
-                      "ntp"
+                      "ntp",
+                      "minecraft"
                     ]
                   }
                 }

@@ -142,7 +142,7 @@ type RawDefaultDNSRule struct {
 	QueryDNSSEC              bool                                                                        `json:"query_dnssec,omitempty"`
 	Network                  badoption.Listable[string]                                                  `json:"network,omitempty" enum:"tcp,udp"`
 	AuthUser                 badoption.Listable[string]                                                  `json:"auth_user,omitempty"`
-	Protocol                 badoption.Listable[string]                                                  `json:"protocol,omitempty" enum:"tls,http,quic,dns,stun,bittorrent,dtls,ssh,rdp,ntp"`
+	Protocol                 badoption.Listable[string]                                                  `json:"protocol,omitempty" enum:"tls,http,quic,dns,stun,bittorrent,dtls,ssh,rdp,ntp,minecraft"`
 	Domain                   badoption.Listable[string]                                                  `json:"domain,omitempty"`
 	DomainSuffix             badoption.Listable[string]                                                  `json:"domain_suffix,omitempty"`
 	DomainKeyword            badoption.Listable[string]                                                  `json:"domain_keyword,omitempty"`

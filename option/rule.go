@@ -142,7 +142,7 @@ type RawDefaultRule struct {
 	IPVersion                int                                                                         `json:"ip_version,omitempty" enum:"4,6"`
 	Network                  badoption.Listable[string]                                                  `json:"network,omitempty" enum:"tcp,udp,icmp"`
 	AuthUser                 badoption.Listable[string]                                                  `json:"auth_user,omitempty"`
-	Protocol                 badoption.Listable[string]                                                  `json:"protocol,omitempty" enum:"tls,http,quic,dns,stun,bittorrent,dtls,ssh,rdp,ntp"`
+	Protocol                 badoption.Listable[string]                                                  `json:"protocol,omitempty" enum:"tls,http,quic,dns,stun,bittorrent,dtls,ssh,rdp,ntp,minecraft"`
 	Client                   badoption.Listable[string]                                                  `json:"client,omitempty"`
 	Domain                   badoption.Listable[string]                                                  `json:"domain,omitempty"`
 	DomainSuffix             badoption.Listable[string]                                                  `json:"domain_suffix,omitempty"`

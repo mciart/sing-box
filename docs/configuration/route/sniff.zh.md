@@ -22,6 +22,7 @@
 |   UDP   |    `dtls`    |      /      |     /      |
 |   TCP   |    `ssh`     |      /      | SSH 客户端名称  |
 |   TCP   |    `rdp`     |      /      |     /      |
+|   TCP   | `minecraft`  |   服务器地址    |     /      |
 |   UDP   |    `ntp`     |      /      |     /      |
 
 |         QUIC 客户端         |     类型     |

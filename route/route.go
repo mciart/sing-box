@@ -762,6 +762,7 @@ func (r *Router) actionSniff(
 				sniff.BitTorrent,
 				sniff.SSH,
 				sniff.RDP,
+				sniff.MinecraftHandshake,
 			}
 		}
 		sniffBuffer := buf.NewPacket()
