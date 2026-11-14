@@ -56,7 +56,12 @@ TCP、UDP 和 ICMP 共用同一次选择，只保留一个 `selected`。探测�
 
 ### 发布
 
-打上 `v*` 标签后，`.github/workflows/release.yml` 交叉编译 sing-box 本体并发布到 GitHub Releases。编译标签使用 `release/DEFAULT_BUILD_TAGS_OTHERS`，关闭 CGO，不包含 naive outbound。
+版本号使用 `v1.14.4-mciart-N`。`N` 从 0 开始，每发布一次加 1。开发分支不跟随这个序号改名。
+
+- `v1.14.4-mciart-0`：Minecraft 与泰拉瑞亚探测。
+- `v1.14.4-mciart-1`：在上一版上加入 TCP、UDP、ICMP 共用一次选择的 urltest。
+
+打上 `v*` 标签后，`.github/workflows/release.yml` 交叉编译 sing-box 本体并发布到 GitHub Releases。编译标签使用 `release/DEFAULT_BUILD_TAGS_OTHERS`，关闭 CGO，不包含 naive outbound。程序里的版本号取自标签名。
 
 ## License
 
