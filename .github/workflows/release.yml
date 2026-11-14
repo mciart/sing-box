@@ -1,0 +1,108 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && format('v{0}', matrix.goarm) }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: linux, goarch: arm, goarm: "7" }
+          - { goos: linux, goarch: "386" }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+          - { goos: windows, goarch: arm64 }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Build archive
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          TAGS="$(cat release/DEFAULT_BUILD_TAGS_OTHERS)"
+          LDFLAGS_SHARED="$(cat release/LDFLAGS)"
+          mkdir -p dist
+          EXT=""
+          if [ "$GOOS" = "windows" ]; then
+            EXT=".exe"
+          fi
+          go build -trimpath -o "dist/sing-box${EXT}" -tags "${TAGS}" \
+            -ldflags "-X github.com/sagernet/sing-box/constant.Version=${VERSION} ${LDFLAGS_SHARED} -s -w -buildid=" \
+            ./cmd/sing-box
+          NAME="sing-box-${VERSION}-${GOOS}-${GOARCH}"
+          if [ -n "${GOARM}" ]; then
+            NAME="${NAME}v${GOARM}"
+          fi
+          mkdir -p "${NAME}"
+          cp LICENSE "${NAME}/"
+          cp "dist/sing-box${EXT}" "${NAME}/"
+          if [ "$GOOS" = "windows" ]; then
+            zip -qr "dist/${NAME}.zip" "${NAME}"
+          else
+            tar -czf "dist/${NAME}.tar.gz" "${NAME}"
+          fi
+          rm -rf "${NAME}" "dist/sing-box" "dist/sing-box.exe"
+
+      - name: Upload archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: sing-box-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && format('v{0}', matrix.goarm) }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download archives
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum ./* > SHA256SUMS
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            'sing-box 1.14.4 with a Minecraft Java handshake sniffer.' \
+            '' \
+            'The protocol name is `minecraft`. It recognizes the first TCP packet on any port and records the handshake server address as the sniffed domain.' \
+            '' \
+            'These binaries use `release/DEFAULT_BUILD_TAGS_OTHERS` with CGO disabled. That includes `with_quic`, `with_utls`, `with_wireguard`, `with_acme`, and `with_gvisor`. The naive outbound is not included.' \
+            > notes.md
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --title "sing-box ${GITHUB_REF_NAME}" \
+            --notes-file notes.md
