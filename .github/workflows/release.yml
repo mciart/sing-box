@@ -103,10 +103,12 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s\n' \
-            'sing-box 1.14.4 with TCP game sniffers.' \
+            'sing-box 1.14.4 with game sniffers and one shared urltest selection.' \
             '' \
             '`minecraft` recognizes a Minecraft Java handshake on any port and records the server address.' \
             '`terraria` recognizes a Terraria connect request on any port. The sniffed client is the version string, such as Terraria279.' \
+            '' \
+            'urltest keeps one selected outbound for TCP, UDP, and ICMP. Successful probes are scored by the median of recent samples. Consecutive probe failures are required before switching away from an outbound.' \
             '' \
             'These binaries use `release/DEFAULT_BUILD_TAGS_OTHERS` with CGO disabled. That includes `with_quic`, `with_utls`, `with_wireguard`, `with_acme`, and `with_gvisor`. The naive outbound is not included.' \
             > notes.md

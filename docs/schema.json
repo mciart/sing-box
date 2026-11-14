@@ -13505,6 +13505,22 @@
               "minimum": 0,
               "maximum": 65535
             },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "fallback"
+              ]
+            },
+            "samples": {
+              "type": "integer"
+            },
+            "consecutive": {
+              "type": "integer"
+            },
+            "max_failures": {
+              "type": "integer"
+            },
             "idle_timeout": {
               "$ref": "#/$defs/Duration"
             },

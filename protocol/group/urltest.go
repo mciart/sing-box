@@ -45,7 +45,11 @@ type URLTest struct {
 	tags                         []string
 	link                         string
 	interval                     time.Duration
+	mode                         string
 	tolerance                    uint16
+	samples                      int
+	consecutive                  int
+	maxFailures                  int
 	idleTimeout                  time.Duration
 	group                        *URLTestGroup
 	checkAccess                  sync.Mutex
@@ -53,15 +57,40 @@ type URLTest struct {
 }
 
 func NewURLTest(ctx context.Context, router adapter.Router, logger log.ContextLogger, tag string, options option.URLTestOutboundOptions) (adapter.Outbound, error) {
+	mode := options.Mode
+	if mode == "" {
+		mode = urlTestModeAuto
+	}
+	switch mode {
+	case urlTestModeAuto, urlTestModeFallback:
+	default:
+		return nil, E.New("unknown urltest mode: ", mode)
+	}
+	samples := options.Samples
+	if samples <= 0 {
+		samples = defaultURLTestSamples
+	}
+	consecutive := options.Consecutive
+	if consecutive <= 0 {
+		consecutive = defaultURLTestConsecutive
+	}
+	maxFailures := options.MaxFailures
+	if maxFailures <= 0 {
+		maxFailures = defaultURLTestMaxFailures
+	}
 	outbound := &URLTest{
-		Adapter:                      outbound.NewAdapter(C.TypeURLTest, tag, []string{N.NetworkTCP, N.NetworkUDP}, options.Outbounds),
+		Adapter:                      outbound.NewAdapter(C.TypeURLTest, tag, []string{N.NetworkTCP, N.NetworkUDP, N.NetworkICMP}, options.Outbounds),
 		ctx:                          ctx,
 		outbound:                     service.FromContext[adapter.OutboundManager](ctx),
 		logger:                       logger,
 		tags:                         options.Outbounds,
 		link:                         options.URL,
 		interval:                     time.Duration(options.Interval),
+		mode:                         mode,
 		tolerance:                    options.Tolerance,
+		samples:                      samples,
+		consecutive:                  consecutive,
+		maxFailures:                  maxFailures,
 		idleTimeout:                  time.Duration(options.IdleTimeout),
 		interruptExternalConnections: options.InterruptExistConnections,
 	}
@@ -87,7 +116,17 @@ func (s *URLTest) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 			}
 			outbounds = append(outbounds, detour)
 		}
-		group, err := NewURLTestGroup(s.ctx, s.outbound, s.logger, outbounds, s.link, s.interval, s.tolerance, s.idleTimeout, s.interruptExternalConnections)
+		group, err := NewURLTestGroup(s.ctx, s.outbound, s.logger, outbounds, urlTestOptions{
+			link:                         s.link,
+			interval:                     s.interval,
+			mode:                         s.mode,
+			tolerance:                    s.tolerance,
+			samples:                      s.samples,
+			consecutive:                  s.consecutive,
+			maxFailures:                  s.maxFailures,
+			idleTimeout:                  s.idleTimeout,
+			interruptExternalConnections: s.interruptExternalConnections,
+		})
 		if err != nil {
 			return err
 		}
@@ -104,16 +143,7 @@ func (s *URLTest) All() []string {
 }
 
 func (s *URLTest) Selected(network string) adapter.Outbound {
-	var outbound adapter.Outbound
-	if network == N.NetworkUDP {
-		outbound = s.group.selectedOutboundUDP
-	} else {
-		outbound = s.group.selectedOutboundTCP
-	}
-	if outbound == nil {
-		outbound, _ = s.group.Select(network)
-	}
-	return outbound
+	return s.group.snapshotSelected()
 }
 
 func (s *URLTest) AttachConnection(closer io.Closer) func() {
@@ -126,14 +156,11 @@ func (s *URLTest) References() []string {
 	if group == nil {
 		return nil
 	}
-	var references []string
-	if group.selectedOutboundTCP != nil {
-		references = append(references, group.selectedOutboundTCP.Tag())
+	selected := group.snapshotSelected()
+	if selected == nil {
+		return nil
 	}
-	if group.selectedOutboundUDP != nil && group.selectedOutboundUDP != group.selectedOutboundTCP {
-		references = append(references, group.selectedOutboundUDP.Tag())
-	}
-	return references
+	return []string{selected.Tag()}
 }
 
 func (s *URLTest) URLTest(ctx context.Context) (map[string]uint16, error) {
@@ -168,46 +195,30 @@ func (s *URLTest) InterfaceUpdated(ctx context.Context) {
 
 func (s *URLTest) DialContext(ctx context.Context, network string, destination M.Socksaddr) (net.Conn, error) {
 	s.group.Touch()
-	var outbound adapter.Outbound
-	switch N.NetworkName(network) {
-	case N.NetworkTCP:
-		outbound = s.group.selectedOutboundTCP
-	case N.NetworkUDP:
-		outbound = s.group.selectedOutboundUDP
-	default:
-		return nil, E.Extend(N.ErrUnknownNetwork, network)
-	}
-	if outbound == nil {
-		outbound, _ = s.group.Select(network)
-	}
+	outbound := s.group.snapshotSelected()
 	if outbound == nil {
 		return nil, E.New("missing supported outbound")
 	}
 	conn, err := outbound.DialContext(ctx, network, destination)
-	if err == nil {
-		return s.group.interruptGroup.NewConn(conn, interrupt.IsExternalConnectionFromContext(ctx)), nil
+	if err != nil {
+		s.logger.ErrorContext(ctx, err)
+		return nil, err
 	}
-	s.logger.ErrorContext(ctx, err)
-	s.group.history.DeleteURLTestHistory(outbound.Tag())
-	return nil, err
+	return s.group.interruptGroup.NewConn(conn, interrupt.IsExternalConnectionFromContext(ctx)), nil
 }
 
 func (s *URLTest) ListenPacket(ctx context.Context, destination M.Socksaddr) (net.PacketConn, error) {
 	s.group.Touch()
-	outbound := s.group.selectedOutboundUDP
-	if outbound == nil {
-		outbound, _ = s.group.Select(N.NetworkUDP)
-	}
+	outbound := s.group.snapshotSelected()
 	if outbound == nil {
 		return nil, E.New("missing supported outbound")
 	}
 	conn, err := outbound.ListenPacket(ctx, destination)
-	if err == nil {
-		return s.group.interruptGroup.NewPacketConn(conn, interrupt.IsExternalConnectionFromContext(ctx)), nil
+	if err != nil {
+		s.logger.ErrorContext(ctx, err)
+		return nil, err
 	}
-	s.logger.ErrorContext(ctx, err)
-	s.group.history.DeleteURLTestHistory(outbound.Tag())
-	return nil, err
+	return s.group.interruptGroup.NewPacketConn(conn, interrupt.IsExternalConnectionFromContext(ctx)), nil
 }
 
 type URLTestGroup struct {
@@ -219,12 +230,18 @@ type URLTestGroup struct {
 	outbounds                    []adapter.Outbound
 	link                         string
 	interval                     time.Duration
+	mode                         string
 	tolerance                    uint16
+	samples                      int
+	consecutive                  int
+	maxFailures                  int
 	idleTimeout                  time.Duration
 	history                      *urltest.HistoryStorage
 	checking                     atomic.Bool
-	selectedOutboundTCP          adapter.Outbound
-	selectedOutboundUDP          adapter.Outbound
+	selected                     adapter.Outbound
+	scores                       map[string]*outboundScore
+	streakTag                    string
+	streak                       int
 	interruptGroup               *interrupt.Group
 	interruptExternalConnections bool
 	access                       sync.Mutex
@@ -235,18 +252,42 @@ type URLTestGroup struct {
 	lastActive                   common.TypedValue[time.Time]
 }
 
-func NewURLTestGroup(ctx context.Context, outboundManager adapter.OutboundManager, logger log.Logger, outbounds []adapter.Outbound, link string, interval time.Duration, tolerance uint16, idleTimeout time.Duration, interruptExternalConnections bool) (*URLTestGroup, error) {
-	if interval == 0 {
-		interval = C.DefaultURLTestInterval
+type urlTestOptions struct {
+	link                         string
+	interval                     time.Duration
+	mode                         string
+	tolerance                    uint16
+	samples                      int
+	consecutive                  int
+	maxFailures                  int
+	idleTimeout                  time.Duration
+	interruptExternalConnections bool
+}
+
+func NewURLTestGroup(ctx context.Context, outboundManager adapter.OutboundManager, logger log.Logger, outbounds []adapter.Outbound, options urlTestOptions) (*URLTestGroup, error) {
+	if options.interval == 0 {
+		options.interval = C.DefaultURLTestInterval
 	}
-	if tolerance == 0 {
-		tolerance = 50
+	if options.tolerance == 0 {
+		options.tolerance = 50
 	}
-	if idleTimeout == 0 {
-		idleTimeout = C.DefaultURLTestIdleTimeout
+	if options.idleTimeout == 0 {
+		options.idleTimeout = C.DefaultURLTestIdleTimeout
 	}
-	if interval > idleTimeout {
+	if options.interval > options.idleTimeout {
 		return nil, E.New("interval must be less or equal than idle_timeout")
+	}
+	if options.mode == "" {
+		options.mode = urlTestModeAuto
+	}
+	if options.samples <= 0 {
+		options.samples = defaultURLTestSamples
+	}
+	if options.consecutive <= 0 {
+		options.consecutive = defaultURLTestConsecutive
+	}
+	if options.maxFailures <= 0 {
+		options.maxFailures = defaultURLTestMaxFailures
 	}
 	history := service.PtrFromContext[urltest.HistoryStorage](ctx)
 	if history == nil {
@@ -257,15 +298,20 @@ func NewURLTestGroup(ctx context.Context, outboundManager adapter.OutboundManage
 		outbound:                     outboundManager,
 		logger:                       logger,
 		outbounds:                    outbounds,
-		link:                         link,
-		interval:                     interval,
-		tolerance:                    tolerance,
-		idleTimeout:                  idleTimeout,
+		link:                         options.link,
+		interval:                     options.interval,
+		mode:                         options.mode,
+		tolerance:                    options.tolerance,
+		samples:                      options.samples,
+		consecutive:                  options.consecutive,
+		maxFailures:                  options.maxFailures,
+		idleTimeout:                  options.idleTimeout,
 		history:                      history,
+		scores:                       make(map[string]*outboundScore),
 		close:                        make(chan struct{}),
 		pause:                        service.FromContext[pause.Manager](ctx),
 		interruptGroup:               interrupt.NewGroup(),
-		interruptExternalConnections: interruptExternalConnections,
+		interruptExternalConnections: options.interruptExternalConnections,
 	}, nil
 }
 
@@ -307,48 +353,17 @@ func (g *URLTestGroup) Close() error {
 	return nil
 }
 
-func (g *URLTestGroup) Select(network string) (adapter.Outbound, bool) {
-	var minDelay uint16
-	var minOutbound adapter.Outbound
-	switch network {
-	case N.NetworkTCP:
-		if g.selectedOutboundTCP != nil {
-			if history := g.history.LoadURLTestHistory(RealTag(g.selectedOutboundTCP, N.NetworkTCP)); history != nil {
-				minOutbound = g.selectedOutboundTCP
-				minDelay = history.Delay
-			}
-		}
-	case N.NetworkUDP:
-		if g.selectedOutboundUDP != nil {
-			if history := g.history.LoadURLTestHistory(RealTag(g.selectedOutboundUDP, N.NetworkUDP)); history != nil {
-				minOutbound = g.selectedOutboundUDP
-				minDelay = history.Delay
-			}
-		}
+func (g *URLTestGroup) snapshotSelected() adapter.Outbound {
+	g.access.Lock()
+	defer g.access.Unlock()
+	if g.selected != nil {
+		return g.selected
 	}
-	for _, detour := range g.outbounds {
-		if !common.Contains(detour.Network(), network) {
-			continue
-		}
-		history := g.history.LoadURLTestHistory(RealTag(detour, network))
-		if history == nil {
-			continue
-		}
-		if minDelay == 0 || minDelay > history.Delay+g.tolerance {
-			minDelay = history.Delay
-			minOutbound = detour
-		}
+	if len(g.outbounds) == 0 {
+		return nil
 	}
-	if minOutbound == nil {
-		for _, detour := range g.outbounds {
-			if !common.Contains(detour.Network(), network) {
-				continue
-			}
-			return detour, false
-		}
-		return nil, false
-	}
-	return minOutbound, true
+	g.selected = g.outbounds[0]
+	return g.selected
 }
 
 func (g *URLTestGroup) loopCheck(ticker *time.Ticker, closeChan <-chan struct{}) {
@@ -390,9 +405,162 @@ func (g *URLTestGroup) urlTest(ctx context.Context, force bool) (map[string]uint
 		return make(map[string]uint16), nil
 	}
 	defer g.checking.Store(false)
-	result := URLTestOutbounds(ctx, g.outbound, g.history, g.logger, g.outbounds, g.link, g.interval, force)
+	results := g.probe(ctx)
+	g.access.Lock()
+	for _, result := range results {
+		g.recordLocked(result)
+	}
+	g.access.Unlock()
+	g.publishScores(results)
 	g.performUpdateCheck()
-	return result, nil
+	return g.delayMap(), nil
+}
+
+func (g *URLTestGroup) probe(ctx context.Context) []urlTestProbe {
+	b, _ := batch.New(ctx, batch.WithConcurrencyNum[any](10))
+	var (
+		access  sync.Mutex
+		results []urlTestProbe
+	)
+	for _, detour := range g.outbounds {
+		detour := detour
+		tag := detour.Tag()
+		b.Go(tag, func() (any, error) {
+			if ctx.Err() != nil {
+				return nil, nil
+			}
+			testCtx, cancel := context.WithTimeout(ctx, C.TCPTimeout)
+			defer cancel()
+			delay, err := urltest.URLTest(testCtx, g.link, detour)
+			if ctx.Err() != nil {
+				return nil, nil
+			}
+			access.Lock()
+			results = append(results, urlTestProbe{tag: tag, delay: delay, err: err})
+			access.Unlock()
+			return nil, nil
+		})
+	}
+	b.Wait()
+	return results
+}
+
+func (g *URLTestGroup) recordLocked(result urlTestProbe) {
+	score := g.scores[result.tag]
+	if score == nil {
+		score = &outboundScore{}
+		g.scores[result.tag] = score
+	}
+	if result.err != nil {
+		g.logger.Debug("outbound ", result.tag, " unavailable: ", result.err)
+	} else {
+		g.logger.Debug("outbound ", result.tag, " available: ", result.delay, "ms")
+	}
+	alive, median, died := score.record(result.delay, result.err != nil, g.samples, g.maxFailures)
+	if died {
+		g.logger.Info("outbound ", result.tag, " marked unavailable after ", g.maxFailures, " consecutive failures")
+	}
+	score.pendingMedian = median
+	score.pendingAlive = alive
+	score.pendingDied = died
+	score.pendingSuccess = result.err == nil
+	score.pending = true
+}
+
+func (g *URLTestGroup) publishScores(results []urlTestProbe) {
+	type historyUpdate struct {
+		tag    string
+		delay  uint16
+		remove bool
+	}
+	g.access.Lock()
+	updates := make([]historyUpdate, 0, len(results))
+	seen := make(map[string]bool, len(results))
+	for _, result := range results {
+		seen[result.tag] = true
+	}
+	for tag, score := range g.scores {
+		if !seen[tag] || !score.pending {
+			continue
+		}
+		score.pending = false
+		if score.pendingDied {
+			updates = append(updates, historyUpdate{tag: tag, remove: true})
+			continue
+		}
+		if score.pendingSuccess && score.pendingAlive {
+			updates = append(updates, historyUpdate{tag: tag, delay: score.pendingMedian})
+		}
+	}
+	g.access.Unlock()
+	for _, update := range updates {
+		if update.remove {
+			g.history.DeleteURLTestHistory(update.tag)
+			continue
+		}
+		g.history.StoreURLTestHistory(update.tag, &adapter.URLTestHistory{
+			Time:  time.Now(),
+			Delay: update.delay,
+		})
+	}
+}
+
+func (g *URLTestGroup) delayMap() map[string]uint16 {
+	g.access.Lock()
+	defer g.access.Unlock()
+	result := make(map[string]uint16)
+	for _, detour := range g.outbounds {
+		score := g.scores[detour.Tag()]
+		if score == nil || !score.alive {
+			continue
+		}
+		result[detour.Tag()] = score.median()
+	}
+	return result
+}
+
+func (g *URLTestGroup) performUpdateCheck() {
+	g.updateAccess.Lock()
+	defer g.updateAccess.Unlock()
+	g.access.Lock()
+	order := make([]urlTestView, 0, len(g.outbounds))
+	for _, detour := range g.outbounds {
+		score := g.scores[detour.Tag()]
+		view := urlTestView{tag: detour.Tag()}
+		if score != nil && score.alive {
+			view.alive = true
+			view.median = score.median()
+		}
+		if score != nil && !score.alive && score.failures >= g.maxFailures {
+			view.down = true
+		}
+		order = append(order, view)
+	}
+	current := ""
+	if g.selected != nil {
+		current = g.selected.Tag()
+	}
+	choice := chooseURLTest(g.mode, order, current, g.tolerance, g.consecutive, g.streakTag, g.streak)
+	g.streakTag = choice.streakTag
+	g.streak = choice.streak
+	var next adapter.Outbound
+	for _, detour := range g.outbounds {
+		if detour.Tag() == choice.selected {
+			next = detour
+			break
+		}
+	}
+	previous := g.selected
+	changed := previous != nil && next != nil && previous.Tag() != next.Tag()
+	if next != nil {
+		g.selected = next
+	}
+	g.access.Unlock()
+	if changed {
+		g.logger.Info("urltest selected ", next.Tag(), ": ", choice.reason)
+		g.interruptGroup.Interrupt(g.interruptExternalConnections)
+		g.history.NotifyUpdated()
+	}
 }
 
 type urlTestResult struct {
@@ -497,34 +665,5 @@ func (b *urlTestBatch) test(outbounds []adapter.Outbound, link string, interval 
 				return nil, nil
 			})
 		}
-	}
-}
-
-func (g *URLTestGroup) performUpdateCheck() {
-	g.updateAccess.Lock()
-	defer g.updateAccess.Unlock()
-	var (
-		updated  bool
-		selected bool
-	)
-	if outbound, exists := g.Select(N.NetworkTCP); outbound != nil && (g.selectedOutboundTCP == nil || (exists && outbound != g.selectedOutboundTCP)) {
-		if g.selectedOutboundTCP != nil {
-			updated = true
-		}
-		g.selectedOutboundTCP = outbound
-		selected = true
-	}
-	if outbound, exists := g.Select(N.NetworkUDP); outbound != nil && (g.selectedOutboundUDP == nil || (exists && outbound != g.selectedOutboundUDP)) {
-		if g.selectedOutboundUDP != nil {
-			updated = true
-		}
-		g.selectedOutboundUDP = outbound
-		selected = true
-	}
-	if updated {
-		g.interruptGroup.Interrupt(g.interruptExternalConnections)
-	}
-	if selected {
-		g.history.NotifyUpdated()
 	}
 }
