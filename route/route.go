@@ -763,6 +763,7 @@ func (r *Router) actionSniff(
 				sniff.SSH,
 				sniff.RDP,
 				sniff.MinecraftHandshake,
+				sniff.TerrariaConnect,
 			}
 		}
 		sniffBuffer := buf.NewPacket()

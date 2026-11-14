@@ -511,6 +511,8 @@ func (r *RuleActionSniff) build() error {
 			r.PacketSniffers = append(r.PacketSniffers, sniff.NTP)
 		case C.ProtocolMinecraft:
 			r.StreamSniffers = append(r.StreamSniffers, sniff.MinecraftHandshake)
+		case C.ProtocolTerraria:
+			r.StreamSniffers = append(r.StreamSniffers, sniff.TerrariaConnect)
 		default:
 			return E.New("unknown sniffer: ", name)
 		}

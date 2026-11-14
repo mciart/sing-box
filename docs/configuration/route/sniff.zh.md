@@ -23,6 +23,7 @@
 |   TCP   |    `ssh`     |      /      | SSH 客户端名称  |
 |   TCP   |    `rdp`     |      /      |     /      |
 |   TCP   | `minecraft`  |   服务器地址    |     /      |
+|   TCP   | `terraria`   |      /      |    版本字符串    |
 |   UDP   |    `ntp`     |      /      |     /      |
 
 |         QUIC 客户端         |     类型     |

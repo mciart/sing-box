@@ -267,7 +267,7 @@ func (r *RejectActionOptions) UnmarshalJSON(bytes []byte) error {
 }
 
 type RouteActionSniff struct {
-	Sniffer badoption.Listable[string] `json:"sniffer,omitempty" enum:"tls,http,quic,dns,stun,bittorrent,dtls,ssh,rdp,ntp,minecraft"`
+	Sniffer badoption.Listable[string] `json:"sniffer,omitempty" enum:"tls,http,quic,dns,stun,bittorrent,dtls,ssh,rdp,ntp,minecraft,terraria"`
 	Timeout badoption.Duration         `json:"timeout,omitempty"`
 }
 

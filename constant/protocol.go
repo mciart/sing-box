@@ -12,6 +12,7 @@ const (
 	ProtocolRDP        = "rdp"
 	ProtocolNTP        = "ntp"
 	ProtocolMinecraft  = "minecraft"
+	ProtocolTerraria   = "terraria"
 )
 
 const (

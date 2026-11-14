@@ -1147,7 +1147,8 @@
                         "ssh",
                         "rdp",
                         "ntp",
-                        "minecraft"
+                        "minecraft",
+                        "terraria"
                       ]
                     },
                     {
@@ -1165,7 +1166,8 @@
                           "ssh",
                           "rdp",
                           "ntp",
-                          "minecraft"
+                          "minecraft",
+                          "terraria"
                         ]
                       }
                     }
@@ -8789,7 +8791,8 @@
                     "ssh",
                     "rdp",
                     "ntp",
-                    "minecraft"
+                    "minecraft",
+                    "terraria"
                   ]
                 },
                 {
@@ -8807,7 +8810,8 @@
                       "ssh",
                       "rdp",
                       "ntp",
-                      "minecraft"
+                      "minecraft",
+                      "terraria"
                     ]
                   }
                 }
@@ -9379,7 +9383,8 @@
                     "ssh",
                     "rdp",
                     "ntp",
-                    "minecraft"
+                    "minecraft",
+                    "terraria"
                   ]
                 },
                 {
@@ -9397,7 +9402,8 @@
                       "ssh",
                       "rdp",
                       "ntp",
-                      "minecraft"
+                      "minecraft",
+                      "terraria"
                     ]
                   }
                 }
@@ -14386,7 +14392,8 @@
                         "ssh",
                         "rdp",
                         "ntp",
-                        "minecraft"
+                        "minecraft",
+                        "terraria"
                       ]
                     },
                     {
@@ -14404,7 +14411,8 @@
                           "ssh",
                           "rdp",
                           "ntp",
-                          "minecraft"
+                          "minecraft",
+                          "terraria"
                         ]
                       }
                     }
@@ -15112,7 +15120,8 @@
                     "ssh",
                     "rdp",
                     "ntp",
-                    "minecraft"
+                    "minecraft",
+                    "terraria"
                   ]
                 },
                 {
@@ -15130,7 +15139,8 @@
                       "ssh",
                       "rdp",
                       "ntp",
-                      "minecraft"
+                      "minecraft",
+                      "terraria"
                     ]
                   }
                 }
