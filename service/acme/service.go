@@ -61,6 +61,7 @@ type Service struct {
 	openFirewall        bool
 	openFirewallAddress bool
 	firewallStopped     bool
+	listen              listenGate
 }
 
 type acmeFirewallKey struct {
@@ -236,15 +237,15 @@ func (s *Service) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 		config = certmagic.New(cache, *config)
 		if s.openFirewall {
 			s.cleanupLeftoverFirewall()
-			if s.usesHTTPChallenge() {
-				config.OnEvent = s.onCertEvent
-				scope.Add(func() error {
-					s.releaseFirewall()
-					return nil
-				})
-			} else {
-				s.logger.Info("open_firewall ignored because the HTTP-01 challenge is disabled")
-			}
+		}
+		if s.usesHTTPChallenge() && (s.openFirewall || s.openFirewallAddress) {
+			config.OnEvent = s.onCertEvent
+			scope.Add(func() error {
+				s.releaseFirewall()
+				return nil
+			})
+		} else if s.openFirewall {
+			s.logger.Info("open_firewall ignored because the HTTP-01 challenge is disabled")
 		}
 		s.config = config
 	case adapter.StartStateStart:
@@ -265,13 +266,49 @@ func (s *Service) cleanupLeftoverFirewall() {
 }
 
 func (s *Service) onCertEvent(_ context.Context, event string, data map[string]any) error {
+	identifier := certEventIdentifier(data)
 	switch event {
 	case "cert_obtaining":
-		s.activateFirewall(certEventIdentifier(data))
+		s.acquireChallengeListen(identifier)
+		if s.openFirewall {
+			s.activateFirewall(identifier)
+		}
 	case "cert_obtained", "cert_failed":
-		s.deactivateFirewall(certEventIdentifier(data))
+		if s.openFirewall {
+			s.deactivateFirewall(identifier)
+		}
+		s.releaseChallengeListen()
 	}
 	return nil
+}
+
+func (s *Service) acquireChallengeListen(identifier string) {
+	if !s.openFirewallAddress {
+		return
+	}
+	s.listen.Lock()
+	s.listen.active = true
+	host := challengeListenHost(identifier)
+	if host == "" && identifier != "" {
+		s.logger.Warn("open_firewall_only_address: ", identifier, " is not an IP, HTTP-01 listens on every address")
+	}
+	if issuer := s.acmeIssuer(); issuer != nil {
+		issuer.ListenHost = host
+	}
+	if host != "" {
+		s.logger.Info("ACME HTTP challenge listening on ", net.JoinHostPort(host, strconv.Itoa(s.httpChallengePort())))
+	}
+}
+
+func (s *Service) releaseChallengeListen() {
+	if !s.openFirewallAddress || !s.listen.active {
+		return
+	}
+	if issuer := s.acmeIssuer(); issuer != nil {
+		issuer.ListenHost = ""
+	}
+	s.listen.active = false
+	s.listen.Unlock()
 }
 
 func certEventIdentifier(data map[string]any) string {

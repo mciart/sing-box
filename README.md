@@ -60,7 +60,7 @@ ACME certificate provider 增加 `open_firewall`。为 `true` 时，HTTP-01 质�
 
 规则通过 netlink 写进内核，不改 `/etc/nftables.conf`。断电重启后内核规则清空，端口回到配置文件里的状态。sing-box 崩溃而机器没重启时，规则会留到下次启动，启动时会先清掉带这个 userdata 的规则。不需要配置表名。
 
-`open_firewall_only_address` 为 true 时，规则再匹配正在签发的 IP，例如 `tcp dport 80 ip daddr 203.0.113.5 accept`。其他地址的 80 仍然被 filter 丢掉。标识符是域名时没有唯一目的地址，退回放行所有地址并记一条警告。HTTP 套接字仍监听所有地址。
+`open_firewall_only_address` 为 true 时，HTTP-01 只绑定正在签发的 IP，`ss` 看到的是该地址的 80，不是 `*:80`。防火墙规则同样只放行这个目的地址，例如 `tcp dport 80 ip daddr 203.0.113.5 accept`。同一个 provider 的其他地址等这次质询结束再绑定。标识符是域名时没有唯一目的地址，退回监听并放行所有地址，并记一条警告。
 
 链的表名不限。没有 filter input 链时不插规则：mangle、nat、forward 或其他钩子不挡发往本机的新连接，内核默认放行。有 filter input 时，规则插在该链最前面，能压住这条链后面的 drop 和 `policy drop`。prerouting 上的 drop 不在这里处理。
 

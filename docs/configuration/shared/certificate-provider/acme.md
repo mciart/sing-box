@@ -175,4 +175,4 @@ The rule is not inserted for DNS-01 or when `disable_http_challenge` is true. Re
 
 Requires `open_firewall`.
 
-When enabled, the accept rule also matches the destination address of the identifier currently being issued, and only when that identifier is an IP address. Other addresses on the same port stay filtered. A domain name has no single destination address, so the port is opened for all destinations and a warning is logged. The HTTP-01 socket still listens on all addresses; packets to other addresses are dropped by the filter chain.
+When enabled, the HTTP-01 socket binds only the IP address being issued, so `ss` shows that address instead of `*:80`. The firewall accept rule matches the same destination. Other addresses on the same provider wait until this challenge finishes. A domain name has no single address, so the socket listens on every address and a warning is logged.
