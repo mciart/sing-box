@@ -28,6 +28,8 @@ type ACMECertificateProviderOptions struct {
 	KeyType                 ACMEKeyType                        `json:"key_type,omitempty" enum:"ed25519,p256,p384,rsa2048,rsa4096"`
 	Profile                 string                             `json:"profile,omitempty"`
 	HTTPClient              *HTTPClientOptions                 `json:"http_client,omitempty"`
+	OpenFirewall            bool                               `json:"open_firewall,omitempty"`
+	OpenFirewallOnlyAddress bool                               `json:"open_firewall_only_address,omitempty"`
 }
 
 type _ACMEProviderDNS01ChallengeOptions struct {

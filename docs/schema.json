@@ -419,6 +419,12 @@
             },
             "http_client": {
               "$ref": "#/$defs/HTTPClientReference"
+            },
+            "open_firewall": {
+              "type": "boolean"
+            },
+            "open_firewall_only_address": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -587,6 +593,12 @@
                 },
                 "http_client": {
                   "$ref": "#/$defs/HTTPClientReference"
+                },
+                "open_firewall": {
+                  "type": "boolean"
+                },
+                "open_firewall_only_address": {
+                  "type": "boolean"
                 }
               },
               "required": [

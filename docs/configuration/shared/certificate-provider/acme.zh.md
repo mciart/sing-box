@@ -39,7 +39,9 @@ icon: material/new-box
   "dns01_challenge": {},
   "key_type": "",
   "profile": "",
-  "http_client": "" // 或 {}
+  "http_client": "", // 或 {}
+  "open_firewall": false,
+  "open_firewall_only_address": false
 }
 ```
 
@@ -153,3 +155,19 @@ ACME DNS01 质询字段。如果配置，将禁用其他质询方法。
 用于所有提供者 HTTP 请求的 HTTP 客户端。
 
 参阅 [HTTP 客户端字段](/zh/configuration/shared/http-client/) 了解详情。
+
+#### open_firewall
+
+在 Linux 上，HTTP-01 质询进行期间，向已有的 `inet`、`ip`、`ip6` filter input 链最前面插入 accept 规则。规则通过 netlink 写入内核，不修改 `/etc/nftables.conf`，重启后规则消失。端口为 `alternative_http_port`，未设置时为 80。规则 userdata 为 `sing-box-acme`。全部进行中的质询结束（`cert_obtained` 或 `cert_failed`）以及该提供者停止时删除这些规则。不需要在配置里指定表名。
+
+表名不限。没有这类链时不插规则：mangle、nat、forward 和其他钩子不丢发往本机的新连接，内核默认放行。prerouting 上的 drop 不会被改动。
+
+不再使用优先级 `filter - 1` 的独立表。`accept` 只结束当前链，后面 `policy drop` 的 input 链仍会丢包，所以放行规则必须写进那条链。
+
+使用 DNS-01 或 `disable_http_challenge` 为 true 时不会插入。需要 root 或 `CAP_NET_ADMIN`。防火墙操作失败只记录日志，不会中断证书申请。重载会清空 filter 表的规则集时，临时规则也会被清掉。其他操作系统上此选项无效。
+
+#### open_firewall_only_address
+
+需要同时打开 `open_firewall`。
+
+启用后，accept 规则额外匹配当前正在签发的标识符的目的地址，且该标识符必须是 IP。同一端口上的其他地址仍然被丢弃。域名没有唯一的目的地址，这时会放行所有目的地址并记录一条警告。HTTP-01 套接字仍监听所有地址；发往其他地址的包由 filter 链丢弃。

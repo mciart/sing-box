@@ -39,7 +39,9 @@ icon: material/new-box
   "dns01_challenge": {},
   "key_type": "",
   "profile": "",
-  "http_client": "" // or {}
+  "http_client": "", // or {}
+  "open_firewall": false,
+  "open_firewall_only_address": false
 }
 ```
 
@@ -158,3 +160,19 @@ When empty and `provider` is Let's Encrypt, `shortlived` will be used automatica
 HTTP Client for all provider HTTP requests.
 
 See [HTTP Client Fields](/configuration/shared/http-client/) for details.
+
+#### open_firewall
+
+On Linux, insert an accept rule at the front of every existing `inet`, `ip`, and `ip6` filter input chain while an HTTP-01 challenge is in progress. The rule is sent to the kernel with netlink. `/etc/nftables.conf` is not modified, so a reboot drops the rule. The port is `alternative_http_port`, or 80 when that option is empty. The rule's userdata is `sing-box-acme`. Those rules are deleted when every in-flight challenge has finished (`cert_obtained` or `cert_failed`) and when this provider stops. No table name has to be configured.
+
+The table name does not matter. If no such chain exists, nothing is inserted: mangle, nat, forward, and other hooks do not drop new connections to the local host, and the kernel accepts them by default. A drop in a prerouting chain is left unchanged.
+
+A separate table at priority `filter - 1` is not used. An accept verdict ends only the current chain, so a later input chain with `policy drop` still drops the packet. The accept rule has to live in that chain.
+
+The rule is not inserted for DNS-01 or when `disable_http_challenge` is true. Requires root or `CAP_NET_ADMIN`. A firewall error is logged and does not abort issuance. Reloading a ruleset that flushes the filter table removes the temporary rule. On other operating systems the option has no effect.
+
+#### open_firewall_only_address
+
+Requires `open_firewall`.
+
+When enabled, the accept rule also matches the destination address of the identifier currently being issued, and only when that identifier is an IP address. Other addresses on the same port stay filtered. A domain name has no single destination address, so the port is opened for all destinations and a warning is logged. The HTTP-01 socket still listens on all addresses; packets to other addresses are dropped by the filter chain.

@@ -7,12 +7,15 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -48,13 +51,35 @@ var (
 
 type Service struct {
 	certificate.Adapter
-	ctx           context.Context
-	config        *certmagic.Config
-	zapLogger     *zap.Logger
-	dataDirectory string
-	domain        []string
-	nextProtos    []string
+	ctx                 context.Context
+	logger              log.ContextLogger
+	config              *certmagic.Config
+	zapLogger           *zap.Logger
+	dataDirectory       string
+	domain              []string
+	nextProtos          []string
+	openFirewall        bool
+	openFirewallAddress bool
+	firewallStopped     bool
 }
+
+type acmeFirewallKey struct {
+	service    *Service
+	identifier string
+}
+
+type acmeFirewallHold struct {
+	port    int
+	address net.IP
+}
+
+var (
+	acmeFirewallGate        sync.Mutex
+	acmeFirewallHeld        = map[acmeFirewallKey]acmeFirewallHold{}
+	acmeFirewallOpened      bool
+	acmeFirewallUnneeded    bool
+	acmeFirewallDescription string
+)
 
 func NewCertificateProvider(ctx context.Context, logger log.ContextLogger, tag string, options option.ACMECertificateProviderOptions) (adapter.CertificateProviderService, error) {
 	if len(options.Domain) == 0 {
@@ -175,13 +200,16 @@ func NewCertificateProvider(ctx context.Context, logger log.ContextLogger, tag s
 		nextProtos = []string{C.ACMETLS1Protocol}
 	}
 	return &Service{
-		Adapter:       certificate.NewAdapter(C.TypeACME, tag),
-		ctx:           ctx,
-		config:        config,
-		zapLogger:     zapLogger,
-		dataDirectory: dataDirectory,
-		domain:        options.Domain,
-		nextProtos:    nextProtos,
+		Adapter:             certificate.NewAdapter(C.TypeACME, tag),
+		ctx:                 ctx,
+		logger:              logger,
+		config:              config,
+		zapLogger:           zapLogger,
+		dataDirectory:       dataDirectory,
+		domain:              options.Domain,
+		nextProtos:          nextProtos,
+		openFirewall:        options.OpenFirewall,
+		openFirewallAddress: options.OpenFirewallOnlyAddress,
 	}, nil
 }
 
@@ -206,11 +234,160 @@ func (s *Service) Start(stage adapter.StartStage, scope *adapter.Scope) error {
 			return nil
 		})
 		config = certmagic.New(cache, *config)
+		if s.openFirewall {
+			s.cleanupLeftoverFirewall()
+			if s.usesHTTPChallenge() {
+				config.OnEvent = s.onCertEvent
+				scope.Add(func() error {
+					s.releaseFirewall()
+					return nil
+				})
+			} else {
+				s.logger.Info("open_firewall ignored because the HTTP-01 challenge is disabled")
+			}
+		}
 		s.config = config
 	case adapter.StartStateStart:
 		return s.config.ManageAsync(s.ctx, s.domain)
 	}
 	return nil
+}
+
+func (s *Service) cleanupLeftoverFirewall() {
+	acmeFirewallGate.Lock()
+	defer acmeFirewallGate.Unlock()
+	if acmeFirewallOpened || len(acmeFirewallHeld) > 0 {
+		return
+	}
+	if err := closeACMEFirewall(); err != nil {
+		s.logger.Warn("failed to clean up leftover ACME firewall: ", err)
+	}
+}
+
+func (s *Service) onCertEvent(_ context.Context, event string, data map[string]any) error {
+	switch event {
+	case "cert_obtaining":
+		s.activateFirewall(certEventIdentifier(data))
+	case "cert_obtained", "cert_failed":
+		s.deactivateFirewall(certEventIdentifier(data))
+	}
+	return nil
+}
+
+func certEventIdentifier(data map[string]any) string {
+	if data == nil {
+		return ""
+	}
+	identifier, _ := data["identifier"].(string)
+	return identifier
+}
+
+func (s *Service) usesHTTPChallenge() bool {
+	issuer := s.acmeIssuer()
+	return issuer != nil && !issuer.DisableHTTPChallenge && issuer.DNS01Solver == nil
+}
+
+func (s *Service) httpChallengePort() int {
+	if issuer := s.acmeIssuer(); issuer != nil && issuer.AltHTTPPort > 0 {
+		return issuer.AltHTTPPort
+	}
+	return 80
+}
+
+func (s *Service) acmeIssuer() *certmagic.ACMEIssuer {
+	if s.config == nil || len(s.config.Issuers) == 0 {
+		return nil
+	}
+	issuer, _ := s.config.Issuers[0].(*certmagic.ACMEIssuer)
+	return issuer
+}
+
+func (s *Service) activateFirewall(identifier string) {
+	acmeFirewallGate.Lock()
+	defer acmeFirewallGate.Unlock()
+	if s.firewallStopped {
+		return
+	}
+	key := acmeFirewallKey{service: s, identifier: identifier}
+	if _, exists := acmeFirewallHeld[key]; exists {
+		return
+	}
+	port := s.httpChallengePort()
+	var address net.IP
+	if s.openFirewallAddress {
+		address = net.ParseIP(identifier)
+		if address == nil {
+			s.logger.Warn("open_firewall_only_address: ", identifier, " is not an IP, opening port ", port, " for all destinations")
+		}
+	}
+	acmeFirewallHeld[key] = acmeFirewallHold{port: port, address: address}
+	s.applyFirewallLocked()
+}
+
+func (s *Service) deactivateFirewall(identifier string) {
+	acmeFirewallGate.Lock()
+	defer acmeFirewallGate.Unlock()
+	key := acmeFirewallKey{service: s, identifier: identifier}
+	if _, exists := acmeFirewallHeld[key]; !exists {
+		return
+	}
+	delete(acmeFirewallHeld, key)
+	s.applyFirewallLocked()
+}
+
+func (s *Service) releaseFirewall() {
+	acmeFirewallGate.Lock()
+	defer acmeFirewallGate.Unlock()
+	s.firewallStopped = true
+	for key := range acmeFirewallHeld {
+		if key.service == s {
+			delete(acmeFirewallHeld, key)
+		}
+	}
+	s.applyFirewallLocked()
+}
+
+func (s *Service) applyFirewallLocked() {
+	allows := make([]firewallAllow, 0, len(acmeFirewallHeld))
+	for _, hold := range acmeFirewallHeld {
+		allows = append(allows, firewallAllow{port: hold.port, address: hold.address})
+	}
+	opened, err := syncACMEFirewall(allows)
+	if err != nil {
+		s.logger.Warn("failed to update firewall for ACME challenge: ", err)
+		return
+	}
+	description := describeFirewallAllows(allows)
+	if opened {
+		acmeFirewallUnneeded = false
+		if !acmeFirewallOpened || description != acmeFirewallDescription {
+			s.logger.Info("opened firewall for ACME HTTP challenge on ", description)
+		}
+		acmeFirewallOpened = true
+		acmeFirewallDescription = description
+		return
+	}
+	if acmeFirewallOpened {
+		s.logger.Info("closed firewall after ACME challenge")
+	} else if len(allows) > 0 && !acmeFirewallUnneeded {
+		s.logger.Info("no filter input chain; ACME challenge port is already reachable")
+		acmeFirewallUnneeded = true
+	}
+	acmeFirewallOpened = false
+	acmeFirewallDescription = ""
+}
+
+func describeFirewallAllows(allows []firewallAllow) string {
+	allows = normalizeFirewallAllows(allows)
+	parts := make([]string, 0, len(allows))
+	for _, allow := range allows {
+		if allow.address == nil {
+			parts = append(parts, "port "+strconv.Itoa(allow.port))
+			continue
+		}
+		parts = append(parts, "port "+strconv.Itoa(allow.port)+" address "+allow.address.String())
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (s *Service) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {

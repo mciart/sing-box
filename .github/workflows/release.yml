@@ -103,12 +103,14 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s\n' \
-            'sing-box 1.14.4 with game sniffers and one shared urltest selection.' \
+            'sing-box 1.14.4 with game sniffers, one shared urltest selection, and a temporary ACME firewall opening.' \
             '' \
             '`minecraft` recognizes a Minecraft Java handshake on any port and records the server address.' \
             '`terraria` recognizes a Terraria connect request on any port. The sniffed client is the version string, such as Terraria279.' \
             '' \
             'urltest keeps one selected outbound for TCP, UDP, and ICMP. Successful probes are scored by the median of recent samples. Consecutive probe failures are required before switching away from an outbound.' \
+            '' \
+            '`open_firewall` inserts a temporary TCP accept rule into existing nftables filter input chains while an HTTP-01 challenge is in progress. `open_firewall_only_address` limits that rule to the IP being issued. The rule is removed when the challenge finishes and is not written to nftables.conf.' \
             '' \
             'These binaries use `release/DEFAULT_BUILD_TAGS_OTHERS` with CGO disabled. That includes `with_quic`, `with_utls`, `with_wireguard`, `with_acme`, and `with_gvisor`. The naive outbound is not included.' \
             > notes.md

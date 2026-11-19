@@ -10,7 +10,7 @@ https://sing-box.sagernet.org
 
 ## 与原版 sing-box 的差异
 
-这一支基于 v1.14.4。运行时和原版不同的地方只有协议嗅探、urltest 选择，以及发布时用的编译流程。
+这一支基于 v1.14.4。运行时和原版不同的地方有协议嗅探、urltest 选择、ACME 申请时临时放行 HTTP-01 端口，以及发布时用的编译流程。
 
 ### 协议嗅探
 
@@ -54,6 +54,20 @@ TCP、UDP 和 ICMP 共用同一次选择，只保留一个 `selected`。探测�
 
 `fallback` 把顺序写成优先级即可，例如 `"outbounds": ["de", "us"]`、`"mode": "fallback"`。
 
+### ACME 防火墙
+
+ACME certificate provider 增加 `open_firewall`。为 `true` 时，HTTP-01 质询开始后，在已有的 `inet`、`ip`、`ip6` filter input 链最前面插入 `tcp dport 80 accept`。端口跟着 `alternative_http_port`，没写就是 80。规则的 userdata 是 `sing-box-acme`。质询成功、失败，或这个 provider 停止时，只删这些规则。
+
+规则通过 netlink 写进内核，不改 `/etc/nftables.conf`。断电重启后内核规则清空，端口回到配置文件里的状态。sing-box 崩溃而机器没重启时，规则会留到下次启动，启动时会先清掉带这个 userdata 的规则。不需要配置表名。
+
+`open_firewall_only_address` 为 true 时，规则再匹配正在签发的 IP，例如 `tcp dport 80 ip daddr 203.0.113.5 accept`。其他地址的 80 仍然被 filter 丢掉。标识符是域名时没有唯一目的地址，退回放行所有地址并记一条警告。HTTP 套接字仍监听所有地址。
+
+链的表名不限。没有 filter input 链时不插规则：mangle、nat、forward 或其他钩子不挡发往本机的新连接，内核默认放行。有 filter input 时，规则插在该链最前面，能压住这条链后面的 drop 和 `policy drop`。prerouting 上的 drop 不在这里处理。
+
+不能靠另建一张优先级 `filter - 1` 的表。`accept` 只结束当前链，包还会继续进入后面的链。`policy drop` 的 filter input 优先级是 0，更早的 accept 挡不住它。
+
+DNS-01，或 `disable_http_challenge` 为 true 时，不插规则。需要 root 或 `CAP_NET_ADMIN`。插规则失败只记日志，证书申请继续。质询过程中执行 `nft -f /etc/nftables.conf` 会 `flush table inet filter`，临时规则会被清掉。
+
 ### 发布
 
 版本号使用 `v1.14.4-mciart-N`。`N` 从 0 开始，每发布一次加 1。开发分支固定叫 `v1.14.4-mciart`，不跟随这个序号改名。
@@ -62,6 +76,7 @@ TCP、UDP 和 ICMP 共用同一次选择，只保留一个 `selected`。探测�
 
 - `v1.14.4-mciart-0`：Minecraft 与泰拉瑞亚探测。
 - `v1.14.4-mciart-1`：在上一版上加入 TCP、UDP、ICMP 共用一次选择的 urltest。
+- `v1.14.4-mciart-2`：申请 ACME 证书时，在已有的 filter input 链临时放行 HTTP-01 端口。
 
 打上 `v*` 标签后，`.github/workflows/release.yml` 交叉编译 sing-box 本体并发布到 GitHub Releases。编译标签使用 `release/DEFAULT_BUILD_TAGS_OTHERS`，关闭 CGO，不包含 naive outbound。程序里的版本号取自标签名。
 
